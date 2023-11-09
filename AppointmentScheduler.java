@@ -5,10 +5,7 @@ import java.io.IOException;
 import java.time.DayOfWeek;
 import java.time.Month;
 import java.time.ZonedDateTime;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 
 public class AppointmentScheduler {
   private static final String URL = "http://scheduling-interview-2021-265534043.us-west-2.elb.amazonaws.com/api/";
@@ -22,8 +19,9 @@ public class AppointmentScheduler {
 
       // Retrieve the current appointment list
       System.out.println("Get initial appointments");
-      List<AppointmentInfo> appointments = getCurrentAppointments();
-      System.out.println(appointments.toString());
+      List<AppointmentInfo> appointments = new ArrayList<>();
+      appointments = getCurrentAppointments();
+      System.out.println(appointments);
 
       AppointmentRequest appointmentRequest = null;
 
@@ -46,9 +44,10 @@ public class AppointmentScheduler {
         if (newAppointment != null) {
           boolean isSuccessful = bookAppointment(newAppointment);
           if (isSuccessful) {
+            System.out.println("Booked successfully");
             AppointmentInfo addedAppointment = new AppointmentInfo(newAppointment.getDoctorId(), newAppointment.getPersonId(), newAppointment.getAppointmentTime(), newAppointment.isNewPatientAppointment());
             appointments.add(addedAppointment);
-            System.out.println("Added new appointment");
+            System.out.println("Added appointment to local list");
           }
         }
         // No availability, print warning
@@ -108,22 +107,33 @@ public class AppointmentScheduler {
   private static AppointmentInfoRequest findAvailability(AppointmentRequest appointmentRequest, List<AppointmentInfo> currentAppointments) {
     System.out.println("Checking availability for request " + appointmentRequest.toString());
 
-    // Check combinations of time and doctor
-    for (String requestTime : appointmentRequest.getPreferredDays()) {
+    // Check combinations of day, time, and doctor
+    for (String day : appointmentRequest.getPreferredDays()) {
 
-      // Find open time
-      if (isTimeAvailable(requestTime, appointmentRequest.isNew(), appointmentRequest.getPersonId(), currentAppointments)) {
-        System.out.println("Validating time: " + requestTime);
+      // See if day is available
+      if (isDayAvailable(day, appointmentRequest.getPersonId(), currentAppointments)) {
 
-        // See if a doctor is free during that time
-        for (int doctor: appointmentRequest.getPreferredDocs()) {
-          System.out.println("Checking if doctor " + doctor + " is available");
+        // Look through valid times
+        int startHour = appointmentRequest.isNew() ? 15 : 8;
 
-          // Return new appointment to book
-          if (isDoctorAvailable(doctor, requestTime, currentAppointments)) {
-            System.out.println("Found available time and doctor");
+        for (int hour = startHour; hour <= 16; hour++) {
 
-            return new AppointmentInfoRequest(doctor, appointmentRequest.getPersonId(), requestTime, appointmentRequest.isNew(), appointmentRequest.getRequestId());
+          // See if a doctor is free during that time
+          for (int doctor: appointmentRequest.getPreferredDocs()) {
+            System.out.println("Checking if doctor " + doctor + " is available at " + hour);
+
+            StringBuilder requestTime = new StringBuilder(day);
+            if(hour > 9){
+              requestTime.setCharAt(11, '1');
+            }
+            requestTime.setCharAt(12, (char) ('0' + (hour % 10)));
+
+            if (isDoctorAvailable(doctor, requestTime.toString(), currentAppointments)) {
+              System.out.println("Found available time and doctor");
+
+              // Return new appointment to book
+              return new AppointmentInfoRequest(doctor, appointmentRequest.getPersonId(), requestTime.toString(), appointmentRequest.isNew(), appointmentRequest.getRequestId());
+            }
           }
         }
       }
@@ -132,22 +142,10 @@ public class AppointmentScheduler {
     return null;
   }
 
-  private static Boolean isTimeAvailable(String requestAppointmentTime, Boolean isNewPatient, int requestPersonId, List<AppointmentInfo> currentAppointments) {
+  private static Boolean isDayAvailable(String requestDay, int requestPersonId, List<AppointmentInfo> currentAppointments) {
     // Check time constraints
-    ZonedDateTime requestDate = ZonedDateTime.parse(requestAppointmentTime);
-    System.out.println("checking time " + requestAppointmentTime);
-
-    // Is appointment scheduled on the hour?
-    if (requestDate.getMinute() != 0 && requestDate.getSecond() != 0) {
-      System.out.println("appointment not on the hour");
-      return false;
-    }
-
-    // Is appointment between 8am and 4pm?
-    if (requestDate.getHour() <= 8 || requestDate.getHour() >= 16) {
-      System.out.println("appointment not between 8 and 4, at " + requestDate.getHour());
-      return false;
-    }
+    ZonedDateTime requestDate = ZonedDateTime.parse(requestDay);
+    System.out.println("Checking day " + requestDay);
 
     // Is appointment scheduled in 2021?
     if (requestDate.getYear() != 2021) {
@@ -174,27 +172,21 @@ public class AppointmentScheduler {
       if (requestPersonId == existingAppointment.getPersonId()) {
 
         // Is the existing appointment in the same week as the requested appointment?
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(Date.from(requestDate.toInstant()));
-        int weekOfAppointmentRequest = calendar.get(Calendar.WEEK_OF_YEAR);
+        ZonedDateTime existingDate = ZonedDateTime.parse(existingAppointment.getAppointmentTime());
 
-        ZonedDateTime existingDate = ZonedDateTime.parse(requestAppointmentTime);
-        calendar.setTime(Date.from(existingDate.toInstant()));
-        int weekOfExistingAppointment = calendar.get(Calendar.WEEK_OF_YEAR);
+        Calendar windowStart = Calendar.getInstance();
+        windowStart.setTime(Date.from(existingDate.toInstant()));
+        windowStart.add(Calendar.DATE, -6);
 
-        if (weekOfAppointmentRequest == weekOfExistingAppointment) {
-          System.out.println("appointment already scheduled for person " + requestPersonId + " on week " + weekOfAppointmentRequest);
+        Calendar windowEnd = Calendar.getInstance();
+        windowEnd.setTime(Date.from(existingDate.toInstant()));
+        windowEnd.add(Calendar.DATE, 6);
+
+        if(Date.from(requestDate.toInstant()).after(windowStart.getTime()) && Date.from(requestDate.toInstant()).before(windowEnd.getTime())) {
+          // Within a week
+          System.out.println("appointment already scheduled for person " + requestPersonId + " this same week");
           return false;
         }
-      }
-    }
-
-    // Is patient a new patient?
-    if (isNewPatient) {
-      // Is time between 3pm and 4pm?
-      if (requestDate.getHour() < 15 || requestDate.getHour() > 16) {
-        System.out.println("new patient not scheduled between 3 and 4, at " + requestDate.getHour());
-        return false;
       }
     }
 
@@ -211,7 +203,7 @@ public class AppointmentScheduler {
       if (doctor == existingAppointment.getDoctorId()) {
 
         // Is the existing appointment at the same time as the requested appointment?
-        if (requestTime == existingAppointment.getAppointmentTime()) {
+        if (requestTime.equals(existingAppointment.getAppointmentTime())) {
           return false;
         }
       }
@@ -239,7 +231,7 @@ public class AppointmentScheduler {
 
     // Parse json string to convert to AppointmentInfo list
     AppointmentInfo[] appointments = gson.fromJson(jsonString, AppointmentInfo[].class);
-    List<AppointmentInfo> appointmentsList = Arrays.asList(appointments);
+    List<AppointmentInfo> appointmentsList = new ArrayList<>(Arrays.asList(appointments));
 
     return appointmentsList;
   }

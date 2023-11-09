@@ -38,7 +38,7 @@ public class HttpHelpers {
 
     public static String doPost(String uri, String requestBody) throws IOException, ParseException, InvalidTokenException, SchedulerException {
         // Create client
-        final CloseableHttpClient client = HttpClients.createDefault();
+        CloseableHttpClient client = HttpClients.createDefault();
 
         try {
             // Process request
@@ -47,6 +47,7 @@ public class HttpHelpers {
             if (requestBody != null) {
                 StringEntity entity = new StringEntity(requestBody);
                 request.setEntity(entity);
+                request.setHeader("Content-Type", "application/json");
             }
 
             CloseableHttpResponse response = client.execute(request);
