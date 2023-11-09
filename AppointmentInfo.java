@@ -1,3 +1,5 @@
+import java.util.Objects;
+
 public class AppointmentInfo {
     private int doctorId = -1;
     private int personId = -1;
@@ -41,5 +43,23 @@ public class AppointmentInfo {
 
     public void setNewPatientAppointment(boolean newPatientAppointment) {
         isNewPatientAppointment = newPatientAppointment;
+    }
+
+    @Override
+    public String toString() {
+        return "AppointmentInfo{" +
+                "doctorId=" + doctorId +
+                ", personId=" + personId +
+                ", appointmentTime='" + appointmentTime + '\'' +
+                ", isNewPatientAppointment=" + isNewPatientAppointment +
+                '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        AppointmentInfo that = (AppointmentInfo) o;
+        return doctorId == that.doctorId && personId == that.personId && isNewPatientAppointment == that.isNewPatientAppointment && Objects.equals(appointmentTime, that.appointmentTime);
     }
 }

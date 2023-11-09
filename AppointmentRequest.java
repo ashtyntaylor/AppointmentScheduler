@@ -54,4 +54,15 @@ public class AppointmentRequest {
     public void setNew(boolean aNew) {
         isNew = aNew;
     }
+
+    @Override
+    public String toString() {
+        return "AppointmentRequest{" +
+                "requestId=" + requestId +
+                ", personId=" + personId +
+                ", preferredDays=" + preferredDays +
+                ", preferredDocs=" + preferredDocs +
+                ", isNew=" + isNew +
+                '}';
+    }
 }

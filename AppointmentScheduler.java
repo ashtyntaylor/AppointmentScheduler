@@ -1,7 +1,5 @@
 import com.google.gson.Gson;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.core5.http.ParseException;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
 
 import java.io.IOException;
 import java.time.DayOfWeek;
@@ -25,6 +23,7 @@ public class AppointmentScheduler {
       // Retrieve the current appointment list
       System.out.println("Get initial appointments");
       List<AppointmentInfo> appointments = getCurrentAppointments();
+      System.out.println(appointments.toString());
 
       AppointmentRequest appointmentRequest = null;
 
@@ -49,6 +48,7 @@ public class AppointmentScheduler {
           if (isSuccessful) {
             AppointmentInfo addedAppointment = new AppointmentInfo(newAppointment.getDoctorId(), newAppointment.getPersonId(), newAppointment.getAppointmentTime(), newAppointment.isNewPatientAppointment());
             appointments.add(addedAppointment);
+            System.out.println("Added new appointment");
           }
         }
         // No availability, print warning
@@ -60,12 +60,11 @@ public class AppointmentScheduler {
       System.out.println("All requests have been processed!");
 
       // Sanity check
-      CloseableHttpResponse response = HttpHelpers.doPost(URL + "Scheduling/Stop" + AUTH_TOKEN, null);
-      String responseBody = EntityUtils.toString(response.getEntity());
-      List<AppointmentInfo> finalSchedule = createAppointmentList(responseBody);
+      String response = HttpHelpers.doPost(URL + "Scheduling/Stop" + AUTH_TOKEN, null);
+      List<AppointmentInfo> finalSchedule = createAppointmentList(response);
 
       for (int i = 0; i < finalSchedule.size(); i++) {
-        if (finalSchedule.get(i) != appointments.get(i)) {
+        if (!finalSchedule.get(i).equals(appointments.get(i))) {
           System.out.println("Found a discrepancy");
           System.out.println(finalSchedule.get(i));
           System.out.println(appointments.get(i));
@@ -83,81 +82,47 @@ public class AppointmentScheduler {
 
   private static List<AppointmentInfo> getCurrentAppointments() throws IOException, ParseException, InvalidTokenException, SchedulerException {
     // Get list
-    CloseableHttpResponse response = HttpHelpers.doGet(URL + "Scheduling/Schedule" + AUTH_TOKEN);
-    int status = response.getCode();
-    String responseBody = EntityUtils.toString(response.getEntity());
+    String response = HttpHelpers.doGet(URL + "Scheduling/Schedule" + AUTH_TOKEN);
 
-    if (status == 200) {
-      // Convert to Appointment object and save locally
-      List<AppointmentInfo> appointmentsList = createAppointmentList(responseBody);
+    // Convert to Appointment object and save locally
+    List<AppointmentInfo> appointmentsList = createAppointmentList(response);
 
-      return appointmentsList;
-    }
-
-    // Handle errors
-    else {
-      throwAppropriateException(status, responseBody);
-    }
-
-    return null;
+    return appointmentsList;
   }
 
-  private static AppointmentRequest getNewAppointmentRequest() throws IOException, ParseException, InvalidTokenException, SchedulerException {
+  private static AppointmentRequest getNewAppointmentRequest() throws InvalidTokenException, SchedulerException, IOException, ParseException {
     // Get next request
-    CloseableHttpResponse response = HttpHelpers.doGet(URL + "Scheduling/AppointmentRequest" + AUTH_TOKEN);
-    int status = response.getCode();
+    String response = HttpHelpers.doGet(URL + "Scheduling/AppointmentRequest" + AUTH_TOKEN);
 
     // Check if we're done
-    if (status == 204) {
+    if (response == null) {
       return null;
     }
 
-    String responseBody = EntityUtils.toString(response.getEntity());
+    // Convert to Appointment object and save locally
+    AppointmentRequest appointmentRequest = createAppointmentRequest(response);
 
-    // Not done, keep going
-    if (status == 200) {
-      // Convert to Appointment object and save locally
-      AppointmentRequest appointmentRequest = createAppointmentRequest(responseBody);
-
-      return appointmentRequest;
-    }
-
-    // Handle errors
-    else {
-      throwAppropriateException(status, responseBody);
-    }
-
-    return null; // Should never happen (either returns request or throws exception)
-  }
-
-  private static void throwAppropriateException(int status, String message) throws SchedulerException, InvalidTokenException {
-    if (status == 401) {
-      throw new InvalidTokenException();
-    }
-    else if (status == 405) {
-      throw new SchedulerException("The server has indicated an out of sequence call");
-    }
-    else if (status == 500) {
-      throw new SchedulerException("Internal Server Error: " + message);
-    }
-    else {
-      throw new SchedulerException("Unexpected status returned: " + status);
-    }
+    return appointmentRequest;
   }
 
   private static AppointmentInfoRequest findAvailability(AppointmentRequest appointmentRequest, List<AppointmentInfo> currentAppointments) {
+    System.out.println("Checking availability for request " + appointmentRequest.toString());
 
     // Check combinations of time and doctor
     for (String requestTime : appointmentRequest.getPreferredDays()) {
 
       // Find open time
       if (isTimeAvailable(requestTime, appointmentRequest.isNew(), appointmentRequest.getPersonId(), currentAppointments)) {
+        System.out.println("Validating time: " + requestTime);
 
         // See if a doctor is free during that time
         for (int doctor: appointmentRequest.getPreferredDocs()) {
+          System.out.println("Checking if doctor " + doctor + " is available");
 
           // Return new appointment to book
           if (isDoctorAvailable(doctor, requestTime, currentAppointments)) {
+            System.out.println("Found available time and doctor");
+
             return new AppointmentInfoRequest(doctor, appointmentRequest.getPersonId(), requestTime, appointmentRequest.isNew(), appointmentRequest.getRequestId());
           }
         }
@@ -170,29 +135,35 @@ public class AppointmentScheduler {
   private static Boolean isTimeAvailable(String requestAppointmentTime, Boolean isNewPatient, int requestPersonId, List<AppointmentInfo> currentAppointments) {
     // Check time constraints
     ZonedDateTime requestDate = ZonedDateTime.parse(requestAppointmentTime);
+    System.out.println("checking time " + requestAppointmentTime);
 
     // Is appointment scheduled on the hour?
     if (requestDate.getMinute() != 0 && requestDate.getSecond() != 0) {
+      System.out.println("appointment not on the hour");
       return false;
     }
 
     // Is appointment between 8am and 4pm?
     if (requestDate.getHour() <= 8 || requestDate.getHour() >= 16) {
+      System.out.println("appointment not between 8 and 4, at " + requestDate.getHour());
       return false;
     }
 
     // Is appointment scheduled in 2021?
     if (requestDate.getYear() != 2021) {
+      System.out.println("appointment not in 2021, in " + requestDate.getYear());
       return false;
     }
 
     // Is appointment scheduled in Nov or Dec?
     if (requestDate.getMonth() != Month.NOVEMBER && requestDate.getMonth() != Month.DECEMBER) {
+      System.out.println("appointment not in Nov or Dec, in " + requestDate.getMonth());
       return false;
     }
 
     // Is appointment scheduled on a weekday?
     if (requestDate.getDayOfWeek() == DayOfWeek.SATURDAY || requestDate.getDayOfWeek() == DayOfWeek.SUNDAY) {
+      System.out.println("appointment not on weekday, on " + requestDate.getDayOfWeek());
       return false;
     }
 
@@ -212,6 +183,7 @@ public class AppointmentScheduler {
         int weekOfExistingAppointment = calendar.get(Calendar.WEEK_OF_YEAR);
 
         if (weekOfAppointmentRequest == weekOfExistingAppointment) {
+          System.out.println("appointment already scheduled for person " + requestPersonId + " on week " + weekOfAppointmentRequest);
           return false;
         }
       }
@@ -221,6 +193,7 @@ public class AppointmentScheduler {
     if (isNewPatient) {
       // Is time between 3pm and 4pm?
       if (requestDate.getHour() < 15 || requestDate.getHour() > 16) {
+        System.out.println("new patient not scheduled between 3 and 4, at " + requestDate.getHour());
         return false;
       }
     }
@@ -251,15 +224,12 @@ public class AppointmentScheduler {
     Gson gson = new Gson();
     String newAppointmentRequestJson = gson.toJson(newAppointment);
 
-    CloseableHttpResponse response = HttpHelpers.doPost(URL + "Scheduling/Schedule" + AUTH_TOKEN, newAppointmentRequestJson);
-    int status = response.getCode();
-    String responseBody = EntityUtils.toString(response.getEntity());
-
-    if (status == 200) {
+    try {
+      HttpHelpers.doPost(URL + "Scheduling/Schedule" + AUTH_TOKEN, newAppointmentRequestJson);
       return true;
-    }
-    else {
-      throwAppropriateException(status, responseBody);
+
+    } catch (SchedulerException e){
+      System.out.println(e.getMessage());
       return false;
     }
   }
